@@ -1,0 +1,11 @@
+.git
+.air.toml
+dist/
+server
+test/
+*.md
+build.sh
+docker.sh
+Dockerfile
+.gitignore
+AGENTS.md
