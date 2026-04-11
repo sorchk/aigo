@@ -34,15 +34,15 @@ models:
     runtime: llama
     gguf_file: "/datadisk/models/hf/unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf"
     mmproj_file: "/datadisk/models/hf/unsloth/Qwen3.5-4B-GGUF/mmproj-F16.gguf"
-    n_gpu_layers: 50
+    n_gpu_layers: 99
     n_ctx: 131072
     auto_load: true
     enabled: true
 
-  - name: copaw-flash-4b
+  - name: copaw-4b
     type: llm
     runtime: llama
-    gguf_file: "/datadisk/models/hf/agentscope-ai/CoPaw-Flash-4B-Q8_0/CoPaw-flash-4B-20260330-q8.gguf"
+    gguf_file: "/datadisk/models/hf/agentscope-ai/CoPaw-Flash-4B-Q4_K_M/CoPaw-flash-4B-20260330-q4.gguf"
     n_gpu_layers: 99
     n_ctx: 131072
     auto_load: true
@@ -55,3 +55,13 @@ models:
     onnx_subdir: "onnx_q4"
     auto_load: true
     enabled: false
+
+  - name: gemma4-4b
+    type: llm
+    runtime: llama
+    gguf_file: "/datadisk/models/hf/unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf"
+    mmproj_file: "/datadisk/models/hf/unsloth/gemma-4-E4B-it-GGUF/mmproj-F16.gguf"
+    n_gpu_layers: 99
+    n_ctx: 131072
+    auto_load: true
+    enabled: true

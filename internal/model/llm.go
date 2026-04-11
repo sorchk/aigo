@@ -74,8 +74,39 @@ func (m *LlamaServerManager) Start() error {
 	args := []string{
 		"-m", m.modelCfg.GGUFFile,
 		"--host", m.socketPath,
-		"-ngl", strconv.Itoa(m.modelCfg.NGPULayers),
 	}
+
+	if m.modelCfg.NGPULayers > 0 {
+		args = append(args, "-ngl", strconv.Itoa(m.modelCfg.NGPULayers))
+	}
+
+	device := m.modelCfg.Device
+	if device == "" {
+		device = "cpu"
+	}
+
+	switch config.DeviceCategory(device) {
+	case "cuda", "tensorrt":
+		if m.modelCfg.NGPULayers == 0 {
+			args = append(args, "-ngl", "99")
+		}
+	case "rocm":
+		if m.modelCfg.NGPULayers == 0 {
+			args = append(args, "-ngl", "99")
+		}
+		args = append(args, "-sm", "hip")
+	case "vulkan":
+		if m.modelCfg.NGPULayers == 0 {
+			args = append(args, "-ngl", "99")
+		}
+		args = append(args, "-sm", "vulkan")
+	case "coreml":
+		if m.modelCfg.NGPULayers == 0 {
+			args = append(args, "-ngl", "99")
+		}
+		args = append(args, "-sm", "metal")
+	}
+
 	if m.modelCfg.NCtx > 0 {
 		args = append(args, "-c", strconv.Itoa(m.modelCfg.NCtx))
 	}

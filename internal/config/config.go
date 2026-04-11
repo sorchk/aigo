@@ -31,6 +31,7 @@ type ModelConfig struct {
 	TokenizerPath  string   `yaml:"tokenizer_path"`
 	ModelPath      string   `yaml:"model_path"`
 	Device         string   `yaml:"device"`
+	DeviceID       int      `yaml:"device_id"`
 
 	GGUFFile   string `yaml:"gguf_file"`
 	MMProjFile string `yaml:"mmproj_file"`
@@ -41,6 +42,69 @@ type ModelConfig struct {
 	MaxOutputTokens    int                    `yaml:"max_output_tokens"`
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
 	EnableThinking     *bool                  `yaml:"enable_thinking"`
+}
+
+func IsCUDADevice(device string) bool {
+	return device == "cuda" || strings.HasPrefix(device, "cuda:")
+}
+
+func IsROCmDevice(device string) bool {
+	return device == "rocm" || device == "hip" || strings.HasPrefix(device, "rocm:") || strings.HasPrefix(device, "hip:")
+}
+
+func IsVulkanDevice(device string) bool {
+	return device == "vulkan" || strings.HasPrefix(device, "vulkan:")
+}
+
+func IsCoreMLDevice(device string) bool {
+	return device == "coreml" || device == "mlx"
+}
+
+func IsTensorRTDevice(device string) bool {
+	return device == "tensorrt" || strings.HasPrefix(device, "tensorrt:")
+}
+
+func IsDMLDevice(device string) bool {
+	return device == "dml" || strings.HasPrefix(device, "dml:")
+}
+
+func IsOpenVINODevice(device string) bool {
+	return device == "openvino" || strings.HasPrefix(device, "openvino:")
+}
+
+func IsGPUDevice(device string) bool {
+	return device != "" && device != "cpu"
+}
+
+func ParseDeviceID(device string, defaultID int) int {
+	parts := strings.SplitN(device, ":", 2)
+	if len(parts) == 2 {
+		if id, err := strconv.Atoi(parts[1]); err == nil {
+			return id
+		}
+	}
+	return defaultID
+}
+
+func DeviceCategory(device string) string {
+	switch {
+	case IsCUDADevice(device):
+		return "cuda"
+	case IsROCmDevice(device):
+		return "rocm"
+	case IsVulkanDevice(device):
+		return "vulkan"
+	case IsCoreMLDevice(device):
+		return "coreml"
+	case IsTensorRTDevice(device):
+		return "tensorrt"
+	case IsDMLDevice(device):
+		return "dml"
+	case IsOpenVINODevice(device):
+		return "openvino"
+	default:
+		return "cpu"
+	}
 }
 
 type Config struct {
@@ -241,19 +305,14 @@ func EnsureConfDir(dir string) error {
 			return fmt.Errorf("create dir %s: %w", targetDir, err)
 		}
 
-		needWrite := true
-		if existing, err := os.ReadFile(targetPath); err == nil {
-			if string(existing) == string(data) {
-				needWrite = false
-			}
+		if _, err := os.Stat(targetPath); err == nil {
+			return nil
 		}
 
-		if needWrite {
-			if err := os.WriteFile(targetPath, data, 0644); err != nil {
-				return fmt.Errorf("write %s: %w", targetPath, err)
-			}
-			log.Printf("Released config file: %s", targetPath)
+		if err := os.WriteFile(targetPath, data, 0644); err != nil {
+			return fmt.Errorf("write %s: %w", targetPath, err)
 		}
+		log.Printf("Released config file: %s", targetPath)
 
 		return nil
 	})

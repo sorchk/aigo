@@ -6,10 +6,12 @@
 #   cpu        - CPU only (default)               [amd64, arm64]
 #   cuda11     - NVIDIA CUDA 11.8                 [amd64]
 #   cuda12     - NVIDIA CUDA 12.6                 [amd64]
-#   rocm       - AMD ROCm                         [amd64]
+#   cuda13     - NVIDIA CUDA 13.x                 [amd64]
+#   rocm       - AMD ROCm 7.x                     [amd64]
 #   vulkan     - Vulkan (AMD/Intel/ARM GPUs)      [amd64, arm64]
 #   jetpack5   - NVIDIA JetPack 5 (L4T r35.x)     [arm64]
 #   jetpack6   - NVIDIA JetPack 6 (L4T r36.x)     [arm64]
+#   mlx        - Apple MLX / CoreML               [arm64 macOS]
 #
 # Build examples:
 #   docker build -t aigo:cpu .
@@ -113,6 +115,28 @@ ENV LLAMA_SERVER_PATH=/usr/bin/llama-server
 EXPOSE 8000
 CMD ["./server"]
 
+# ======================== CUDA 13 ========================
+FROM nvidia/cuda:13.0.0-runtime-ubuntu24.04 AS cuda13
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ort-gpu /tmp/ort-libs.tar /tmp/
+RUN tar xf /tmp/ort-libs.tar -C /usr/ && ldconfig && rm /tmp/ort-libs.tar
+
+COPY --from=builder /server /app/server
+
+WORKDIR /app
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV ONNXRUNTIME_LIB=/usr/lib/libonnxruntime.so
+ENV LLAMA_SERVER_PATH=/usr/bin/llama-server
+EXPOSE 8000
+CMD ["./server"]
+
 # ======================== CUDA 12 ========================
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04 AS cuda12
 
@@ -157,8 +181,8 @@ ENV LLAMA_SERVER_PATH=/usr/bin/llama-server
 EXPOSE 8000
 CMD ["./server"]
 
-# ======================== ROCm ========================
-FROM rocm/dev-ubuntu-22.04:6.3 AS rocm
+# ======================== ROCm 7.x ========================
+FROM rocm/dev-ubuntu-24.04:7.0 AS rocm
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
