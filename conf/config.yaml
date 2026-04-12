@@ -2,6 +2,15 @@ api_token: ""
 onnxruntime_lib: "/home/sorc/.pyenv/versions/3.12.13/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.24.4"
 llama_server_path: ""
 
+logging:
+  enabled: true
+  path: "logs/requests.log"
+  max_size_mb: 100
+  max_backups: 7
+  max_age_days: 30
+  compress: true
+  sanitize: true
+
 models:
   - name: bge-reranker-v2-m3
     type: rerank
@@ -37,6 +46,7 @@ models:
     n_gpu_layers: 99
     n_ctx: 131072
     jinja: true
+    reasoning_parser: "qwen3"
     auto_load: true
     enabled: true
 
