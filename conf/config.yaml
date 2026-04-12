@@ -36,6 +36,7 @@ models:
     mmproj_file: "/datadisk/models/hf/unsloth/Qwen3.5-4B-GGUF/mmproj-F16.gguf"
     n_gpu_layers: 99
     n_ctx: 131072
+    jinja: true
     auto_load: true
     enabled: true
 
