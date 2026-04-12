@@ -116,6 +116,9 @@ func (m *LlamaServerManager) Start() error {
 	if m.modelCfg.Type == "embedding" {
 		args = append(args, "--embeddings")
 	}
+	if m.modelCfg.Jinja {
+		args = append(args, "--jinja")
+	}
 
 	m.cmd = exec.CommandContext(ctx, m.serverBinary, args...)
 	m.cmd.Stdout = os.Stdout
