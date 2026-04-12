@@ -12,15 +12,16 @@ import (
 )
 
 type ModelHub struct {
-	cfg       *config.Config
-	mu        sync.RWMutex
-	rerank    *MultiModelRegistry[*OnnxRerankService]
-	llm       *MultiModelRegistry[*LlamaServerManager]
-	onnxLLM   *MultiModelRegistry[*OnnxLLMService]
-	embed     *MultiModelRegistry[*LlamaServerManager]
-	onnxEmbed *MultiModelRegistry[*OnnxEmbeddingService]
-	models    map[string]*config.ModelConfig
-	aliases   map[string]string
+	cfg         *config.Config
+	mu          sync.RWMutex
+	rerank      *MultiModelRegistry[*OnnxRerankService]
+	llamaRerank *MultiModelRegistry[*LlamaServerManager]
+	llm         *MultiModelRegistry[*LlamaServerManager]
+	onnxLLM     *MultiModelRegistry[*OnnxLLMService]
+	embed       *MultiModelRegistry[*LlamaServerManager]
+	onnxEmbed   *MultiModelRegistry[*OnnxEmbeddingService]
+	models      map[string]*config.ModelConfig
+	aliases     map[string]string
 }
 
 func NewModelHub(cfg *config.Config) *ModelHub {
@@ -63,19 +64,43 @@ func buildRegistryConfigs(models []config.ModelConfig) []ModelConfig {
 }
 
 func (h *ModelHub) initRerank() {
-	models := h.cfg.GetModels("rerank")
-	if len(models) == 0 {
-		return
+	var onnxModels []config.ModelConfig
+	var llamaModels []config.ModelConfig
+
+	for _, m := range h.cfg.GetModels("rerank") {
+		switch m.Runtime {
+		case "onnx":
+			onnxModels = append(onnxModels, m)
+		default:
+			llamaModels = append(llamaModels, m)
+		}
 	}
 
-	cfg := h.cfg
-	h.rerank = NewMultiModelRegistry[*OnnxRerankService](buildRegistryConfigs(models), "rerank", func(name string, mc ModelConfig) (*OnnxRerankService, error) {
-		modelCfg := cfg.GetModel("rerank", name)
-		if modelCfg == nil {
-			return nil, fmt.Errorf("rerank model config not found: %s", name)
-		}
-		return NewOnnxRerankService(*modelCfg, cfg.OnnxRuntimeLib)
-	})
+	if len(onnxModels) > 0 {
+		cfg := h.cfg
+		h.rerank = NewMultiModelRegistry[*OnnxRerankService](buildRegistryConfigs(onnxModels), "rerank", func(name string, mc ModelConfig) (*OnnxRerankService, error) {
+			modelCfg := cfg.GetModel("rerank", name)
+			if modelCfg == nil {
+				return nil, fmt.Errorf("rerank model config not found: %s", name)
+			}
+			return NewOnnxRerankService(*modelCfg, cfg.OnnxRuntimeLib)
+		})
+	}
+
+	if len(llamaModels) > 0 {
+		cfg := h.cfg
+		h.llamaRerank = NewMultiModelRegistry[*LlamaServerManager](buildRegistryConfigs(llamaModels), "llama-rerank", func(name string, mc ModelConfig) (*LlamaServerManager, error) {
+			modelCfg := cfg.GetModel("rerank", name)
+			if modelCfg == nil {
+				return nil, fmt.Errorf("rerank model config not found: %s", name)
+			}
+			mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath)
+			if err := mgr.Start(); err != nil {
+				return nil, err
+			}
+			return mgr, nil
+		})
+	}
 }
 
 func (h *ModelHub) initLLM() {
@@ -166,9 +191,16 @@ func (h *ModelHub) initEmbedding() {
 
 func (h *ModelHub) GetReranker(modelName string) (*OnnxRerankService, error) {
 	if h.rerank == nil {
-		return nil, &ValueError{Msg: "No rerank models configured"}
+		return nil, &ValueError{Msg: "No onnx rerank models configured"}
 	}
 	return h.rerank.GetModel(modelName)
+}
+
+func (h *ModelHub) GetLlamaReranker(modelName string) (*LlamaServerManager, error) {
+	if h.llamaRerank == nil {
+		return nil, &ValueError{Msg: "No llama rerank models configured"}
+	}
+	return h.llamaRerank.GetModel(modelName)
 }
 
 func (h *ModelHub) GetLLM(modelName string) (*LlamaServerManager, error) {
@@ -241,6 +273,9 @@ func (h *ModelHub) ListModels() []schema.ModelInfo {
 	if h.rerank != nil {
 		result = append(result, h.rerank.ListModels("rerank")...)
 	}
+	if h.llamaRerank != nil {
+		result = append(result, h.llamaRerank.ListModels("rerank")...)
+	}
 	if h.embed != nil {
 		result = append(result, h.embed.ListModels("embedding")...)
 	}
@@ -259,8 +294,15 @@ func (h *ModelHub) ListModels() []schema.ModelInfo {
 
 func (h *ModelHub) GetStatuses() map[string][]ModelStatus {
 	result := make(map[string][]ModelStatus)
+	var rerankStatuses []ModelStatus
 	if h.rerank != nil {
-		result["rerank"] = h.rerank.GetModelStatuses()
+		rerankStatuses = append(rerankStatuses, h.rerank.GetModelStatuses()...)
+	}
+	if h.llamaRerank != nil {
+		rerankStatuses = append(rerankStatuses, h.llamaRerank.GetModelStatuses()...)
+	}
+	if len(rerankStatuses) > 0 {
+		result["rerank"] = rerankStatuses
 	}
 	var embedStatuses []ModelStatus
 	if h.embed != nil {
@@ -298,7 +340,7 @@ func (h *ModelHub) HasLLM() bool {
 }
 
 func (h *ModelHub) HasRerank() bool {
-	return h.rerank != nil
+	return h.rerank != nil || h.llamaRerank != nil
 }
 
 func (h *ModelHub) HasEmbedding() bool {
@@ -313,6 +355,13 @@ func (h *ModelHub) Shutdown() {
 			svc.Destroy()
 		}
 		h.rerank.mu.RUnlock()
+	}
+	if h.llamaRerank != nil {
+		h.llamaRerank.mu.RLock()
+		for _, mgr := range h.llamaRerank.models {
+			mgr.Shutdown()
+		}
+		h.llamaRerank.mu.RUnlock()
 	}
 	if h.onnxEmbed != nil {
 		h.onnxEmbed.mu.RLock()

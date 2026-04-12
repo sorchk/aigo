@@ -1,5 +1,5 @@
 api_token: ""
-onnxruntime_lib: "/home/sorc/.pyenv/versions/3.12.13/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.24.4"
+onnxruntime_lib: "/home/sorc/.pyenv/versions/3.12.0/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so.1.24.4"
 llama_server_path: ""
 
 logging:
@@ -14,19 +14,27 @@ logging:
 models:
   - name: bge-reranker-v2-m3
     type: rerank
+    runtime: llama
+    gguf_file: "/datadisk/models/hf/gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf"
+    n_gpu_layers: 99
+    auto_load: true
+    enabled: false
+
+  - name: bge-reranker-v2-m3
+    type: rerank
     runtime: onnx
     model_path: "/datadisk/models/hf/onnx-community/bge-reranker-v2-m3-ONNX"
-    onnx_subdir: "onnx"
+    onnx_subdir: "onnx_int8"
     auto_load: true
-    enabled: true
+    enabled: false
 
   - name: bge-m3
     type: embedding
     runtime: llama
-    gguf_file: "/datadisk/models/hf/gpustack/bge-m3-GGUF/bge-m3-FP16.gguf"
+    gguf_file: "/datadisk/models/hf/gpustack/bge-m3-GGUF/bge-m3-Q8_0.gguf"
     n_gpu_layers: 99
     auto_load: true
-    enabled: false
+    enabled: true
 
   - name: bge-m3
     type: embedding
@@ -38,15 +46,23 @@ models:
     auto_load: true
     enabled: true
 
-  - name: qwen3.5-4b
+  - name: qwen3.5
     type: llm
     runtime: llama
-    gguf_file: "/datadisk/models/hf/unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf"
-    mmproj_file: "/datadisk/models/hf/unsloth/Qwen3.5-4B-GGUF/mmproj-F16.gguf"
+    gguf_file: "/datadisk/models/hf/unsloth/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0.gguf"
+    mmproj_file: "/datadisk/models/hf/unsloth/Qwen3.5-9B-GGUF/mmproj-F16.gguf"
+    # chat_template_file: "/datadisk/models/hf/jinja/qwen3.5-9b-opus.jinja"
+    chat_template_file: "/datadisk/models/hf/jinja/qwen3.5-instruct.jinja"
     n_gpu_layers: 99
-    n_ctx: 131072
+    # chat_template_kwargs: 
+    #   enable_thinking: false
+    n_ctx: 65536
     jinja: true
-    reasoning_parser: "qwen3"
+    presence_penalty: 0.0
+    temperature: 0.6
+    top_k: 20
+    top_p: 0.95
+    min_p: 0.0
     auto_load: true
     enabled: true
 
@@ -75,4 +91,4 @@ models:
     n_gpu_layers: 99
     n_ctx: 131072
     auto_load: true
-    enabled: true
+    enabled: false

@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -14,8 +17,14 @@ import (
 
 func Rerank(hub *model.ModelHub) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "failed to read request body"})
+			return
+		}
+
 		var req schema.RerankRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := parseJSON(body, &req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 			return
 		}
@@ -23,6 +32,12 @@ func Rerank(hub *model.ModelHub) gin.HandlerFunc {
 		modelName := ""
 		if req.Model != nil {
 			modelName = *req.Model
+		}
+
+		modelCfg := hub.GetModelConfig(modelName)
+		if modelCfg != nil && modelCfg.Runtime == "llama" {
+			handleLlamaRerank(c, hub, modelName, body)
+			return
 		}
 
 		reranker, err := hub.GetReranker(modelName)
@@ -82,4 +97,40 @@ func Rerank(hub *model.ModelHub) gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+func handleLlamaRerank(c *gin.Context, hub *model.ModelHub, modelName string, body []byte) {
+	mgr, err := hub.GetLlamaReranker(modelName)
+	if err != nil {
+		handleModelErrors(c, err)
+		return
+	}
+
+	var reqMap map[string]interface{}
+	if err := json.Unmarshal(body, &reqMap); err == nil {
+		serverName := mgr.ServerModelName()
+		if serverName != "" {
+			reqMap["model"] = serverName
+		} else {
+			delete(reqMap, "model")
+		}
+		if stripped, err := json.Marshal(reqMap); err == nil {
+			body = stripped
+		}
+	}
+
+	resp, err := mgr.ProxyRequest(http.MethodPost, "/v1/rerank", bytes.NewReader(body))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"detail": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	for key, values := range resp.Header {
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	c.Writer.WriteHeader(resp.StatusCode)
+	io.Copy(c.Writer, resp.Body)
 }

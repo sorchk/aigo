@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/tggo/goSentencePiece v1.1.0
 	github.com/yalue/onnxruntime_go v1.12.1
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

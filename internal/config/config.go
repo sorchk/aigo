@@ -41,9 +41,17 @@ type ModelConfig struct {
 
 	MaxOutputTokens    int                    `yaml:"max_output_tokens"`
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
-	EnableThinking     *bool                  `yaml:"enable_thinking"`
 	Jinja              bool                   `yaml:"jinja"`
-	ReasoningParser    string                 `yaml:"reasoning_parser"`
+	ReasoningFormat    string                 `yaml:"reasoning_format"`
+	ChatTemplate       string                 `yaml:"chat_template"`
+	ChatTemplateFile   string                 `yaml:"chat_template_file"`
+	Webui              *bool                  `yaml:"webui"`
+
+	PresencePenalty string `yaml:"presence_penalty"`
+	Temperature     string `yaml:"temperature"`
+	TopK            string `yaml:"top_k"`
+	TopP            string `yaml:"top_p"`
+	MinP            string `yaml:"min_p"`
 }
 
 func IsCUDADevice(device string) bool {
@@ -183,6 +191,9 @@ func (c *Config) applyDefaults() {
 		if m.Device == "" {
 			m.Device = "cpu"
 		}
+		if m.GGUFFile == "" && strings.HasSuffix(m.ModelPath, ".gguf") {
+			m.GGUFFile = m.ModelPath
+		}
 		if m.TokenizerPath == "" && m.ModelPath != "" {
 			m.TokenizerPath = m.ModelPath + "/tokenizer.json"
 		}
@@ -206,6 +217,8 @@ func (c *Config) applyDefaults() {
 				m.SocketPath = fmt.Sprintf("/tmp/llama-%s.sock", m.Name)
 			case "embedding":
 				m.SocketPath = fmt.Sprintf("/tmp/embedding-%s.sock", m.Name)
+			case "rerank":
+				m.SocketPath = fmt.Sprintf("/tmp/rerank-%s.sock", m.Name)
 			}
 		}
 	}

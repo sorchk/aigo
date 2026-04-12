@@ -119,6 +119,10 @@ func runServer() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	if err := middleware.InitLogging(cfg.Logging); err != nil {
+		log.Fatalf("Failed to initialize logging: %v", err)
+	}
+
 	if cfg.APIToken != "" {
 		log.Println("API token authentication enabled")
 	} else {
@@ -130,6 +134,10 @@ func runServer() {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+
+	if cfg.Logging.Enabled {
+		router.Use(middleware.RequestLogger())
+	}
 
 	auth := middleware.AuthMiddleware(cfg.APIToken)
 	proxyHandler := handler.Proxy(hub)

@@ -9,7 +9,7 @@ Go service providing OpenAI-compatible `/v1/rerank`, `/v1/embeddings`, `/v1/chat
 ```bash
 go mod tidy                                          # Install dependencies
 go build -o server ./cmd/server                      # Build
-go run ./cmd/server                                  # Run with defaults
+go run ./cmd/server                       # Run with defaults
 HOST=0.0.0.0 PORT=8000 ./server                      # Custom host/port
 air                                                  # Hot-reload development (requires .air.toml)
 docker build -t go-rerank-api . && docker run -p 8000:8000 go-rerank-api

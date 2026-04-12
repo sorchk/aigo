@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -18,16 +19,17 @@ import (
 )
 
 type LlamaServerManager struct {
-	cmd          *exec.Cmd
-	client       *http.Client
-	socketPath   string
-	mu           sync.Mutex
-	ready        bool
-	cancelFn     context.CancelFunc
-	modelCfg     config.ModelConfig
-	serverBinary string
-	stopped      bool
-	done         chan struct{}
+	cmd             *exec.Cmd
+	client          *http.Client
+	socketPath      string
+	mu              sync.Mutex
+	ready           bool
+	cancelFn        context.CancelFunc
+	modelCfg        config.ModelConfig
+	serverBinary    string
+	stopped         bool
+	done            chan struct{}
+	serverModelName string
 }
 
 func NewLlamaServerManager(cfg config.ModelConfig, serverBinary string) *LlamaServerManager {
@@ -116,11 +118,49 @@ func (m *LlamaServerManager) Start() error {
 	if m.modelCfg.Type == "embedding" {
 		args = append(args, "--embeddings")
 	}
+	if m.modelCfg.Type == "rerank" {
+		args = append(args, "--rerank")
+	}
 	if m.modelCfg.Jinja {
 		args = append(args, "--jinja")
 	}
-	if m.modelCfg.ReasoningParser != "" {
-		args = append(args, "--reasoning-parser", m.modelCfg.ReasoningParser)
+	if m.modelCfg.ReasoningFormat != "" {
+		args = append(args, "--reasoning-format", m.modelCfg.ReasoningFormat)
+	}
+	if m.modelCfg.ChatTemplate != "" {
+		args = append(args, "--chat-template", m.modelCfg.ChatTemplate)
+	}
+	if m.modelCfg.ChatTemplateFile != "" {
+		args = append(args, "--chat-template-file", m.modelCfg.ChatTemplateFile)
+	}
+	if len(m.modelCfg.ChatTemplateKwargs) > 0 {
+		kwargsJSON, err := json.Marshal(m.modelCfg.ChatTemplateKwargs)
+		if err == nil {
+			args = append(args, "--chat-template-kwargs", string(kwargsJSON))
+		}
+	}
+	if m.modelCfg.Webui != nil {
+		if *m.modelCfg.Webui {
+			args = append(args, "--webui")
+		} else {
+			args = append(args, "--no-webui")
+		}
+	}
+
+	if m.modelCfg.PresencePenalty != "" {
+		args = append(args, "--presence-penalty", m.modelCfg.PresencePenalty)
+	}
+	if m.modelCfg.Temperature != "" {
+		args = append(args, "--temperature", m.modelCfg.Temperature)
+	}
+	if m.modelCfg.TopK != "" {
+		args = append(args, "--top-k", m.modelCfg.TopK)
+	}
+	if m.modelCfg.TopP != "" {
+		args = append(args, "--top-p", m.modelCfg.TopP)
+	}
+	if m.modelCfg.MinP != "" {
+		args = append(args, "--min-p", m.modelCfg.MinP)
 	}
 
 	m.cmd = exec.CommandContext(ctx, m.serverBinary, args...)
@@ -138,6 +178,8 @@ func (m *LlamaServerManager) Start() error {
 	if err := m.WaitForReady(60 * time.Second); err != nil {
 		return err
 	}
+
+	m.fetchServerModelName()
 
 	return nil
 }
@@ -167,6 +209,35 @@ func (m *LlamaServerManager) WaitForReady(timeout time.Duration) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("llama-server not ready after %v", timeout)
+}
+
+func (m *LlamaServerManager) fetchServerModelName() {
+	resp, err := m.client.Get("http://localhost/v1/models")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return
+	}
+	if len(result.Data) > 0 {
+		m.mu.Lock()
+		m.serverModelName = result.Data[0].ID
+		m.mu.Unlock()
+		log.Printf("llama-server model name: %s", result.Data[0].ID)
+	}
+}
+
+func (m *LlamaServerManager) ServerModelName() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.serverModelName
 }
 
 func (m *LlamaServerManager) monitor() {
