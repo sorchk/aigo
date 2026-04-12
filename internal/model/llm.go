@@ -119,6 +119,9 @@ func (m *LlamaServerManager) Start() error {
 	if m.modelCfg.Jinja {
 		args = append(args, "--jinja")
 	}
+	if m.modelCfg.ReasoningParser != "" {
+		args = append(args, "--reasoning-parser", m.modelCfg.ReasoningParser)
+	}
 
 	m.cmd = exec.CommandContext(ctx, m.serverBinary, args...)
 	m.cmd.Stdout = os.Stdout
