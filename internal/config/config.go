@@ -42,6 +42,7 @@ type ModelConfig struct {
 	MaxOutputTokens    int                    `yaml:"max_output_tokens"`
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
 	EnableThinking     *bool                  `yaml:"enable_thinking"`
+	Jinja              bool                   `yaml:"jinja"`
 }
 
 func IsCUDADevice(device string) bool {
