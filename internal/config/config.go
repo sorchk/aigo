@@ -43,6 +43,7 @@ type ModelConfig struct {
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
 	EnableThinking     *bool                  `yaml:"enable_thinking"`
 	Jinja              bool                   `yaml:"jinja"`
+	ReasoningParser    string                 `yaml:"reasoning_parser"`
 }
 
 func IsCUDADevice(device string) bool {
@@ -108,11 +109,22 @@ func DeviceCategory(device string) string {
 	}
 }
 
+type LoggingConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Path       string `yaml:"path"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	MaxBackups int    `yaml:"max_backups"`
+	MaxAgeDays int    `yaml:"max_age_days"`
+	Compress   bool   `yaml:"compress"`
+	Sanitize   bool   `yaml:"sanitize"`
+}
+
 type Config struct {
-	APIToken        string        `yaml:"api_token"`
-	OnnxRuntimeLib  string        `yaml:"onnxruntime_lib"`
-	LlamaServerPath string        `yaml:"llama_server_path"`
-	Models          []ModelConfig `yaml:"models"`
+	APIToken        string         `yaml:"api_token"`
+	OnnxRuntimeLib  string         `yaml:"onnxruntime_lib"`
+	LlamaServerPath string         `yaml:"llama_server_path"`
+	Models          []ModelConfig  `yaml:"models"`
+	Logging         *LoggingConfig `yaml:"logging"`
 }
 
 func Load(path string) (*Config, error) {
@@ -141,6 +153,30 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Logging == nil {
+		c.Logging = &LoggingConfig{
+			Enabled:    false,
+			Path:       "logs/requests.log",
+			MaxSizeMB:  100,
+			MaxBackups: 7,
+			MaxAgeDays: 30,
+			Compress:   true,
+			Sanitize:   true,
+		}
+	}
+	if c.Logging.Path == "" {
+		c.Logging.Path = "logs/requests.log"
+	}
+	if c.Logging.MaxSizeMB == 0 {
+		c.Logging.MaxSizeMB = 100
+	}
+	if c.Logging.MaxBackups == 0 {
+		c.Logging.MaxBackups = 7
+	}
+	if c.Logging.MaxAgeDays == 0 {
+		c.Logging.MaxAgeDays = 30
+	}
+
 	for i := range c.Models {
 		m := &c.Models[i]
 
