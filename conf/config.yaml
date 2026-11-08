@@ -17,6 +17,19 @@ models:
     runtime: llama
     gguf_file: "/datadisk/models/hf/gpustack/bge-reranker-v2-m3-GGUF/bge-reranker-v2-m3-Q8_0.gguf"
     n_gpu_layers: 99
+    # 每个 (query, document) 对必须落在同一个 ubatch 内，否则报
+    # "input (N tokens) is too large to process. increase the physical batch size"
+    # llama-server 默认 n_ubatch=512，模型自身支持 8192
+    n_ctx: 8192
+    n_batch: 8192
+    n_ubatch: 8192
+    # 并发 slot 数（llama-server -np）；0 = 不设置，沿用服务端自动值(4)。
+    n_parallel: 4
+    # 统一 KV 池（--kv-unified / --no-kv-unified）：
+    #   true  = 所有 slot 共享同一个 KV 池，每个 slot 的上下文仍是 n_ctx(8192)
+    #   false = 每个 slot 各持 n_ctx / n_parallel = 2048 的上下文
+    # 不填 = 不传该开关，由服务端默认值决定（上游默认：slot 数自动时开启统一 KV）
+    kv_unified: true
     auto_load: true
     enabled: false
 
@@ -33,6 +46,14 @@ models:
     runtime: llama
     gguf_file: "/datadisk/models/hf/gpustack/bge-m3-GGUF/bge-m3-Q8_0.gguf"
     n_gpu_layers: 99
+    # 单次请求的最大 token 数 = min(n_ubatch, n_ctx)，llama-server 默认 n_ubatch=512
+    n_ctx: 8192
+    n_batch: 8192
+    n_ubatch: 8192
+    # 并发 slot 数（llama-server -np）；0 = 不设置，沿用服务端自动值(4)。
+    n_parallel: 4
+    # 统一 KV 池（--kv-unified / --no-kv-unified），说明见上方同名模型
+    kv_unified: true
     auto_load: true
     enabled: true
 
@@ -63,6 +84,20 @@ models:
     top_k: 20
     top_p: 0.95
     min_p: 0.0
+    # 并发 slot 数（llama-server -np）；不设置 = 服务端自动值(4)。
+    # n_parallel: 4
+    # 统一 KV 池（--kv-unified / --no-kv-unified）；不设置 = 服务端默认。
+    #   true  = 所有 slot 共享一个 KV 池，单请求可用满 n_ctx，但并发总 token 受 n_ctx 限制
+    #   false = 每个 slot 各持 n_ctx / n_parallel 的上下文，互相隔离
+    # kv_unified: true
+    # 额外透传给 llama-server 的参数（原样拼接在内置参数之后）
+    # extra_args:
+    #   - "--flash-attn"
+    #   - "--cache-type-k"
+    #   - "q8_0"
+    #   - "--cache-type-v"
+    #   - "q8_0"
+    #   - "--no-context-shift"
     auto_load: true
     enabled: true
 

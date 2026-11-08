@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -57,22 +58,8 @@ func NewLlamaServerManager(cfg config.ModelConfig, serverBinary string) *LlamaSe
 	}
 }
 
-func (m *LlamaServerManager) Start() error {
-	m.mu.Lock()
-	if m.cancelFn != nil {
-		m.cancelFn()
-	}
-	m.mu.Unlock()
-
-	os.Remove(m.socketPath)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.mu.Lock()
-	m.cancelFn = cancel
-	m.ready = false
-	m.stopped = false
-	m.mu.Unlock()
-
+// buildArgs 组装 llama-server 的命令行参数
+func (m *LlamaServerManager) buildArgs() []string {
 	args := []string{
 		"-m", m.modelCfg.GGUFFile,
 		"--host", m.socketPath,
@@ -111,6 +98,26 @@ func (m *LlamaServerManager) Start() error {
 
 	if m.modelCfg.NCtx > 0 {
 		args = append(args, "-c", strconv.Itoa(m.modelCfg.NCtx))
+	}
+	if m.modelCfg.NBatch > 0 {
+		args = append(args, "-b", strconv.Itoa(m.modelCfg.NBatch))
+	}
+	if m.modelCfg.NUbatch > 0 {
+		args = append(args, "-ub", strconv.Itoa(m.modelCfg.NUbatch))
+	}
+	if m.modelCfg.NParallel > 0 {
+		args = append(args, "-np", strconv.Itoa(m.modelCfg.NParallel))
+	}
+	if m.modelCfg.KVUnified != nil {
+		if *m.modelCfg.KVUnified {
+			args = append(args, "--kv-unified")
+		} else {
+			args = append(args, "--no-kv-unified")
+		}
+	} else if m.modelCfg.NParallel > 0 {
+		// 向后兼容：未显式配置 kv_unified 时，保持旧行为（统一 KV 池）。
+		// 开启统一 KV 池后，每个 slot 的上下文仍是 n_ctx，而不是 n_ctx / n_parallel。
+		args = append(args, "--kv-unified")
 	}
 	if m.modelCfg.MMProjFile != "" {
 		args = append(args, "--mmproj", m.modelCfg.MMProjFile)
@@ -162,6 +169,35 @@ func (m *LlamaServerManager) Start() error {
 	if m.modelCfg.MinP != "" {
 		args = append(args, "--min-p", m.modelCfg.MinP)
 	}
+
+	// 用户自定义参数原样透传，放在内置参数之后，便于覆盖默认值
+	args = append(args, m.modelCfg.ExtraArgs...)
+
+	return args
+}
+
+func (m *LlamaServerManager) Start() error {
+	m.mu.Lock()
+	if m.cancelFn != nil {
+		m.cancelFn()
+	}
+	m.mu.Unlock()
+
+	os.Remove(m.socketPath)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.cancelFn = cancel
+	m.ready = false
+	m.stopped = false
+	m.mu.Unlock()
+
+	args := m.buildArgs()
+
+	log.Printf("llama-server %s: n_ctx=%d n_batch=%d n_ubatch=%d n_parallel=%d kv_unified=%s extra_args=%v",
+		m.modelCfg.Name, m.modelCfg.NCtx, m.modelCfg.NBatch, m.modelCfg.NUbatch, m.modelCfg.NParallel,
+		kvUnifiedState(m.modelCfg.KVUnified), m.modelCfg.ExtraArgs)
+	log.Printf("llama-server %s args: %s", m.modelCfg.Name, strings.Join(redactArgs(args), " "))
 
 	m.cmd = exec.CommandContext(ctx, m.serverBinary, args...)
 	m.cmd.Stdout = os.Stdout
@@ -315,4 +351,34 @@ func (m *LlamaServerManager) ProxyRequest(method, path string, body io.Reader) (
 
 func (m *LlamaServerManager) ModelName() string {
 	return m.modelCfg.Name
+}
+
+// kvUnifiedState 把 kv_unified 配置转成日志用的可读状态
+func kvUnifiedState(p *bool) string {
+	if p == nil {
+		return "auto"
+	}
+	if *p {
+		return "on"
+	}
+	return "off"
+}
+
+// sensitiveArgs 需要在日志中脱敏的参数（值紧跟在参数名之后）
+var sensitiveArgs = map[string]bool{
+	"--api-key":  true,
+	"--hf-token": true,
+	"--hft":      true,
+}
+
+// redactArgs 复制参数列表并把敏感参数的值替换掉，避免写进日志
+func redactArgs(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i < len(out)-1; i++ {
+		if sensitiveArgs[out[i]] {
+			out[i+1] = "***"
+		}
+	}
+	return out
 }

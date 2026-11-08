@@ -6,8 +6,21 @@ ver=${1:-0.0.3}
 build_date=$(date +"%Y%m%d")
 tag="${ver}_${build_date}"
 
+# 只构建指定变体: ./docker.sh 0.0.5 jetpack5 ; 不带第二个参数则全量构建
+only_variant="${2:-}"
+
 export DOCKER_CLI_EXPERIMENTAL=enabled
 export DOCKER_BUILDKIT=1
+
+variant_platform() {
+  case "$1" in
+    cpu)                                   echo "linux/amd64,linux/arm64" ;;
+    cuda13|cuda12|cuda11|rocm)             echo "linux/amd64" ;;
+    vulkan)                                echo "linux/amd64,linux/arm64" ;;
+    jetpack5|jetpack6)                     echo "linux/arm64" ;;
+    *)                                     echo "linux/amd64,linux/arm64" ;;
+  esac
+}
 
 build_variant() {
   local variant=$1
@@ -24,6 +37,15 @@ build_variant() {
     --tag "sorc/${name}:${variant}" \
     .
 }
+
+if [ -n "${only_variant}" ]; then
+  # 单变体模式（JetPack 5 / 6 等）
+  build_variant "${only_variant}" "$(variant_platform "${only_variant}")"
+  echo ""
+  echo "=== Single-variant build complete ==="
+  echo "Image: sorc/${name}:${only_variant}"
+  exit 0
+fi
 
 # CPU (amd64 + arm64)
 build_variant cpu "linux/amd64,linux/arm64"

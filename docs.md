@@ -154,6 +154,12 @@ models:
     mmproj_file: "/path/to/mmproj-F16.gguf"  # 多模态投影文件（可选）
     n_gpu_layers: 50
     n_ctx: 131072             # 上下文窗口大小
+    n_parallel: 4             # 并发 slot 数（-np），0 = 服务端自动值
+    kv_unified: true          # 统一 KV 池，所有 slot 共享，单请求可用满 n_ctx
+    extra_args:               # 额外透传给 llama-server 的参数
+      - "--flash-attn"
+      - "--cache-type-k"
+      - "q8_0"
     auto_load: true
     enabled: true
 
@@ -217,7 +223,23 @@ models:
 | `mmproj_file` | string | 多模态投影文件路径（可选） |
 | `n_gpu_layers` | int | GPU 加载层数 |
 | `n_ctx` | int | 上下文窗口大小 |
+| `n_batch` | int | 逻辑批上限（`-b`） |
+| `n_ubatch` | int | 物理批上限（`-ub`），自动裁剪到 ≤ `n_batch` |
+| `n_parallel` | int | 并发 slot 数（`-np`）；0 = 不设置，沿用服务端自动值 |
+| `kv_unified` | *bool | 统一 KV 池：`true` → `--kv-unified`，`false` → `--no-kv-unified`，不填 = 不传该开关，由服务端默认值决定 |
+| `extra_args` | []string | 原样透传给 llama-server 的额外参数，在内置参数之后追加 |
 | `socket_path` | string | Unix Socket 路径（默认自动生成） |
+
+#### 统一 KV 池（`kv_unified`）
+
+| 维度 | `true`（统一 KV 池） | `false`（每 slot 独立） |
+|------|------|------|
+| KV 显存总量 | 约等于 `n_ctx` 级别 | 约等于 `n_ctx` 级别（总量相同） |
+| 单请求最大上下文 | 可达整个 `n_ctx` | `n_ctx / n_parallel` |
+| 并发请求 | 所有 slot 共享池子，超总池会挤占 | 各 slot 互不影响 |
+| 典型场景 | 长度参差不齐的聊天 / Agent 服务 | 长度可预测的批处理（embedding / rerank） |
+
+未显式配置 `kv_unified` 且 `n_parallel > 0` 时，仍沿用旧行为传 `--kv-unified`。
 
 ---
 

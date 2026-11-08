@@ -37,7 +37,18 @@ type ModelConfig struct {
 	MMProjFile string `yaml:"mmproj_file"`
 	NGPULayers int    `yaml:"n_gpu_layers"`
 	NCtx       int    `yaml:"n_ctx"`
-	SocketPath string `yaml:"socket_path"`
+	NBatch     int    `yaml:"n_batch"`
+	NUbatch    int    `yaml:"n_ubatch"`
+	NParallel  int    `yaml:"n_parallel"`
+	// KVUnified 控制 llama-server 的统一 KV 池。
+	//   nil  : 不传该开关，由服务端默认值决定（n_parallel > 0 时为兼容旧行为仍传 --kv-unified）
+	//   true : 传 --kv-unified，所有 slot 共享同一个 KV 池
+	//   false: 传 --no-kv-unified，每个 slot 各自持有 n_ctx / n_parallel 的上下文配额
+	KVUnified *bool `yaml:"kv_unified"`
+	// ExtraArgs 原样透传给 llama-server 的额外参数，例如 ["--flash-attn", "--cache-type-k", "q8_0"]。
+	// 仅对 runtime: llama 的模型生效，在内置参数之后追加。
+	ExtraArgs  []string `yaml:"extra_args"`
+	SocketPath string   `yaml:"socket_path"`
 
 	MaxOutputTokens    int                    `yaml:"max_output_tokens"`
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
@@ -190,6 +201,18 @@ func (c *Config) applyDefaults() {
 
 		if m.Device == "" {
 			m.Device = "cpu"
+		}
+		// llama-server requires n_ubatch <= n_batch
+		if m.NBatch > 0 && m.NUbatch > m.NBatch {
+			m.NUbatch = m.NBatch
+		}
+		// n_parallel: 0 = 不设置，沿用 llama-server 自动值（4 个 slot + 统一 KV 池）
+		if m.NParallel < 0 {
+			m.NParallel = 0
+		}
+		// n_ctx 小于 n_ubatch 时，超长输入会先撞上下文上限而不是物理批上限
+		if m.NCtx > 0 && m.NUbatch > 0 && m.NCtx < m.NUbatch {
+			log.Printf("model %s: n_ctx (%d) < n_ubatch (%d), long inputs will hit the context limit first", m.Name, m.NCtx, m.NUbatch)
 		}
 		if m.GGUFFile == "" && strings.HasSuffix(m.ModelPath, ".gguf") {
 			m.GGUFFile = m.ModelPath

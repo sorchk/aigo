@@ -38,7 +38,7 @@
 # =============================================================================
 
 # ======================== Go Builder ========================
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.24-bookworm AS builder
 
 ARG TARGETARCH
 
@@ -60,6 +60,69 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     fi && \
     CGO_ENABLED=1 GOARCH=${TARGETARCH} CC=${CC} \
     go build -ldflags="-s -w" -o /server ./cmd/server
+
+# ======================== Go Builder (Ubuntu 18.04 / glibc 2.27) ========================
+# 供 JetPack 5 使用: nvcr.io/nvidia/l4t-jetpack:r35.x 基于 Ubuntu 18.04 (glibc 2.27),
+# Debian bookworm 编译出的二进制需要 GLIBC_2.34/2.36, 在 18.04 上会报
+# "version `GLIBC_2.34' not found"。所以这里用同代 Ubuntu 做 builder。
+FROM ubuntu:18.04 AS builder-bionic
+
+ARG TARGETARCH
+ARG GO_VERSION=1.24.13
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN case "${TARGETARCH}" in \
+      amd64) GOARCH=amd64 ;; \
+      arm64) GOARCH=arm64 ;; \
+      *) GOARCH=amd64 ;; \
+    esac && \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" -o /tmp/go.tgz && \
+    tar -C /usr/local -xzf /tmp/go.tgz && \
+    rm -f /tmp/go.tgz
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN /usr/local/go/bin/go mod download
+COPY . .
+
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} /usr/local/go/bin/go build \
+    -ldflags="-s -w" \
+    -o /server \
+    ./cmd/server
+
+# ======================== Go Builder (Ubuntu 22.04 / glibc 2.35) ========================
+# 供 JetPack 6 使用: nvcr.io/nvidia/l4t-jetpack:r36.x 基于 Ubuntu 22.04 (glibc 2.35),
+# 比 bookworm 的 2.36 低, 同样不能直接用 bookworm builder。
+FROM ubuntu:22.04 AS builder-jammy
+
+ARG TARGETARCH
+ARG GO_VERSION=1.24.13
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN case "${TARGETARCH}" in \
+      amd64) GOARCH=amd64 ;; \
+      arm64) GOARCH=arm64 ;; \
+      *) GOARCH=amd64 ;; \
+    esac && \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" -o /tmp/go.tgz && \
+    tar -C /usr/local -xzf /tmp/go.tgz && \
+    rm -f /tmp/go.tgz
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN /usr/local/go/bin/go mod download
+COPY . .
+
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} /usr/local/go/bin/go build \
+    -ldflags="-s -w" \
+    -o /server \
+    ./cmd/server
 
 # ======================== ORT CPU Downloader ========================
 FROM debian:bookworm-slim AS ort-cpu
@@ -242,7 +305,7 @@ RUN wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_V
     ldconfig && \
     rm -rf /tmp/ort.tgz "/opt/onnxruntime-linux-aarch64-${ORT_VERSION}"
 
-COPY --from=builder /server /app/server
+COPY --from=builder-bionic /server /app/server
 
 WORKDIR /app
 ENV ONNXRUNTIME_LIB=/usr/lib/libonnxruntime.so
@@ -268,7 +331,7 @@ RUN wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_V
     ldconfig && \
     rm -rf /tmp/ort.tgz "/opt/onnxruntime-linux-aarch64-${ORT_VERSION}"
 
-COPY --from=builder /server /app/server
+COPY --from=builder-jammy /server /app/server
 
 WORKDIR /app
 ENV ONNXRUNTIME_LIB=/usr/lib/libonnxruntime.so
