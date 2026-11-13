@@ -64,6 +64,13 @@ WorkingDirectory=%s
 ExecStart=%s run
 Restart=on-failure
 RestartSec=5%s
+# llama-server 子进程的日志默认写入独立的轮转文件，这里只兜底 aigo 自身的日志速率。
+# 超出速率的日志会被丢弃并计数，避免任何刷屏把 journald / 系统日志盘写满。
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aigo
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=2000
 
 [Install]
 WantedBy=multi-user.target

@@ -15,6 +15,11 @@ import (
 	"github.com/sction-ai/go/conf"
 )
 
+// DefaultLogVerbosity 是 llama-server 的默认日志级别：3 = INFO。
+// 上游默认同样是 INFO，但进程环境里的 LLAMA_ARG_LOG_VERBOSITY 可以把它抬到 TRACE，
+// 所以 aigo 会显式下发该级别并清理子进程环境变量。
+const DefaultLogVerbosity = 3
+
 type ModelConfig struct {
 	Name     string   `yaml:"name"`
 	Type     string   `yaml:"type"`
@@ -49,6 +54,19 @@ type ModelConfig struct {
 	// 仅对 runtime: llama 的模型生效，在内置参数之后追加。
 	ExtraArgs  []string `yaml:"extra_args"`
 	SocketPath string   `yaml:"socket_path"`
+
+	// LogVerbosity 控制 llama-server 的日志级别（-lv N）：
+	//   0=generic 1=error 2=warning 3=info 4=trace 5=debug
+	// 不填 = 默认 3(INFO)。TRACE(4)/DEBUG(5) 会把 prompt 缓存等内部状态逐条打印，
+	// 长驻服务里会迅速撑爆日志盘，因此默认强制 INFO。
+	LogVerbosity *int `yaml:"log_verbosity"`
+	// CacheIdleSlots 控制空闲 slot 是否写入 prompt 缓存（--cache-idle-slots / --no-cache-idle-slots）。
+	// nil = 不传该开关，沿用 llama-server 默认（开启）。
+	// 统一 KV 池（--kv-unified）下服务端会自行清理空闲 slot，关掉它可以避免
+	// 缓存条目无限增长（条目只增不减，--cache-ram 的淘汰上限永远触发不了）。
+	CacheIdleSlots *bool `yaml:"cache_idle_slots"`
+	// CacheRAM 限制 prompt 缓存占用的内存上限（MiB，--cache-ram N）；0 = 不传该开关。
+	CacheRAM int `yaml:"cache_ram"`
 
 	MaxOutputTokens    int                    `yaml:"max_output_tokens"`
 	ChatTemplateKwargs map[string]interface{} `yaml:"chat_template_kwargs"`
@@ -136,6 +154,16 @@ type LoggingConfig struct {
 	MaxAgeDays int    `yaml:"max_age_days"`
 	Compress   bool   `yaml:"compress"`
 	Sanitize   bool   `yaml:"sanitize"`
+
+	// LlamaServerLog 控制 llama-server 子进程的日志去向：
+	//   file    = 写入独立轮转文件（默认，<llama_server_log_dir>/llama-server-<模型名>.log）
+	//   stdout  = 继承父进程 stdout/stderr（systemd 下会进 journald）
+	//   discard = 直接丢弃
+	// 默认走独立文件：子进程的 TRACE 级别日志与业务流量无关，
+	// 继承 stdout 会把它们灌进系统日志并撑爆磁盘。
+	LlamaServerLog string `yaml:"llama_server_log"`
+	// LlamaServerLogDir llama-server 子进程日志目录（默认 logs）。
+	LlamaServerLogDir string `yaml:"llama_server_log_dir"`
 }
 
 type Config struct {
@@ -195,9 +223,31 @@ func (c *Config) applyDefaults() {
 	if c.Logging.MaxAgeDays == 0 {
 		c.Logging.MaxAgeDays = 30
 	}
+	if c.Logging.LlamaServerLog == "" {
+		c.Logging.LlamaServerLog = "file"
+	}
+	if c.Logging.LlamaServerLogDir == "" {
+		c.Logging.LlamaServerLogDir = "logs"
+	}
 
 	for i := range c.Models {
 		m := &c.Models[i]
+
+		// llama-server 日志级别默认锁定 INFO(3)：TRACE 会把 prompt 缓存逐条打印出来，
+		// 与业务流量无关但足以在短时间内产生数百 MB 日志。
+		if m.LogVerbosity == nil {
+			v := DefaultLogVerbosity
+			m.LogVerbosity = &v
+		} else if *m.LogVerbosity < 0 || *m.LogVerbosity > 5 {
+			log.Printf("model %s: log_verbosity %d out of range [0,5], clamped", m.Name, *m.LogVerbosity)
+			v := *m.LogVerbosity
+			if v < 0 {
+				v = 0
+			} else {
+				v = 5
+			}
+			m.LogVerbosity = &v
+		}
 
 		if m.Device == "" {
 			m.Device = "cpu"

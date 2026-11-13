@@ -114,6 +114,18 @@ onnxruntime_lib: "/path/to/libonnxruntime.so"
 # llama-server 可执行文件路径（留空则使用 PATH 中的 llama-server）
 llama_server_path: ""
 
+# 日志配置（可选，均有默认值）
+logging:
+  enabled: true               # 是否记录请求日志
+  path: "logs/requests.log"   # 请求日志文件
+  max_size_mb: 100            # 单文件大小上限
+  max_backups: 7              # 保留的历史文件数
+  max_age_days: 30            # 历史文件保留天数
+  compress: true              # 历史文件 gzip 压缩
+  sanitize: true              # 脱敏请求内容
+  llama_server_log: "file"    # llama-server 子进程日志去向：file / stdout / discard
+  llama_server_log_dir: "logs"  # file 模式下的日志目录
+
 models:
   # === Rerank 模型示例 ===
   - name: bge-reranker-v2-m3
@@ -156,6 +168,8 @@ models:
     n_ctx: 131072             # 上下文窗口大小
     n_parallel: 4             # 并发 slot 数（-np），0 = 服务端自动值
     kv_unified: true          # 统一 KV 池，所有 slot 共享，单请求可用满 n_ctx
+    log_verbosity: 3          # llama-server 日志级别（0~5，4=TRACE 会刷爆日志盘）
+    cache_idle_slots: false   # 空闲 slot 是否写入 prompt 缓存
     extra_args:               # 额外透传给 llama-server 的参数
       - "--flash-attn"
       - "--cache-type-k"
@@ -227,8 +241,44 @@ models:
 | `n_ubatch` | int | 物理批上限（`-ub`），自动裁剪到 ≤ `n_batch` |
 | `n_parallel` | int | 并发 slot 数（`-np`）；0 = 不设置，沿用服务端自动值 |
 | `kv_unified` | *bool | 统一 KV 池：`true` → `--kv-unified`，`false` → `--no-kv-unified`，不填 = 不传该开关，由服务端默认值决定 |
+| `log_verbosity` | *int | llama-server 日志级别（`-lv`）：0=generic 1=error 2=warning 3=info（默认）4=trace 5=debug；4 及以上会把整个 prompt 缓存逐条打印出来，日志量与业务流量无关 |
+| `cache_idle_slots` | *bool | 空闲 slot 是否写入 prompt 缓存：`true` → `--cache-idle-slots`，`false` → `--no-cache-idle-slots`；不填 = 不传该开关 |
+| `cache_ram` | int | prompt 缓存上限 MiB（`--cache-ram`）；0 = 不传该开关 |
 | `extra_args` | []string | 原样透传给 llama-server 的额外参数，在内置参数之后追加 |
 | `socket_path` | string | Unix Socket 路径（默认自动生成） |
+
+> `--cache-idle-slots` / `--cache-ram` 依赖较新的 llama-server。启动前会先执行 `llama-server --help` 探测参数是否被当前二进制支持，不支持时跳过该参数并打印告警，不会导致服务启动失败。
+
+#### LoggingConfig 字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `enabled` | bool | 是否记录请求日志（默认 true） |
+| `path` | string | 请求日志文件路径（默认 `logs/requests.log`） |
+| `max_size_mb` | int | 单文件大小上限（默认 100 MiB） |
+| `max_backups` | int | 保留的历史文件数（默认 7） |
+| `max_age_days` | int | 历史文件保留天数（默认 30） |
+| `compress` | bool | 历史文件是否 gzip 压缩（默认 true） |
+| `sanitize` | bool | 是否脱敏请求内容（默认 true） |
+| `llama_server_log` | string | llama-server 子进程日志去向：`file`（默认，写独立轮转文件）/ `stdout`（继承父进程，systemd 下进 journald）/ `discard` |
+| `llama_server_log_dir` | string | `file` 模式下的日志目录（默认 `logs`），文件名形如 `llama-server-<模型名>.log` |
+
+#### llama-server 日志量控制
+
+llama-server 的 TRACE 级别（`log_verbosity: 4`）会在每次 prompt 缓存更新时把**整份缓存**逐条打印：
+
+```
+- cache state: 12789 prompts, ...
+- prompt 0x55f1...: 2048 tokens, checkpoints: 0, 0.000 MiB
+```
+
+该输出与业务请求量无关，且缓存条目只增不减（条目占用记为 `0.000 MiB`，`--cache-ram` 的淘汰上限永远触发不了），日志量会持续加速增长。
+
+aigo 的默认行为：
+
+1. 显式下发 `-lv 3`（INFO），并清理子进程环境中的 `LLAMA_ARG_LOG_VERBOSITY`，避免外部环境把级别提到 TRACE；
+2. 子进程 stdout/stderr 不再继承父进程，改写入独立轮转文件（`logging.llama_server_log: "file"`），避免灌满 journald / 系统日志盘；
+3. `cache_idle_slots: false` 关闭空闲 slot 的 prompt 缓存写入，同时释放常驻缓存占用的内存。
 
 #### 统一 KV 池（`kv_unified`）
 

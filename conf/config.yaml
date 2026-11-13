@@ -10,6 +10,13 @@ logging:
   max_age_days: 30
   compress: true
   sanitize: true
+  # llama-server 子进程日志去向：
+  #   file    = 写入独立轮转文件 <llama_server_log_dir>/llama-server-<模型名>.log（默认）
+  #   stdout  = 继承父进程 stdout/stderr（systemd 下会被收进 journald）
+  #   discard = 直接丢弃
+  # 子进程的日志与业务请求无关，走独立文件可以避免把系统日志盘写满。
+  llama_server_log: "file"
+  llama_server_log_dir: "logs"
 
 models:
   - name: bge-reranker-v2-m3
@@ -54,6 +61,12 @@ models:
     n_parallel: 4
     # 统一 KV 池（--kv-unified / --no-kv-unified），说明见上方同名模型
     kv_unified: true
+    # llama-server 日志级别：0=generic 1=error 2=warning 3=info 4=trace 5=debug
+    # 4(TRACE) 会把整个 prompt 缓存逐条打印出来，与业务流量无关，几分钟就能写出上百 MB。
+    log_verbosity: 3
+    # 空闲 slot 是否写入 prompt 缓存。统一 KV 池下服务端本来就会清理空闲 slot，
+    # 关掉可以避免缓存条目只增不减（条目占用记为 0，--cache-ram 的淘汰上限永远触发不了）。
+    cache_idle_slots: false
     auto_load: true
     enabled: true
 
@@ -90,6 +103,12 @@ models:
     #   true  = 所有 slot 共享一个 KV 池，单请求可用满 n_ctx，但并发总 token 受 n_ctx 限制
     #   false = 每个 slot 各持 n_ctx / n_parallel 的上下文，互相隔离
     # kv_unified: true
+    # llama-server 日志级别：0=generic 1=error 2=warning 3=info 4=trace 5=debug
+    # 4(TRACE) 会把整个 prompt 缓存逐条打印出来，与业务流量无关，几分钟就能写出上百 MB。
+    log_verbosity: 3
+    # 空闲 slot 是否写入 prompt 缓存。统一 KV 池下服务端本来就会清理空闲 slot，
+    # 关掉可以避免缓存条目只增不减（条目占用记为 0，--cache-ram 的淘汰上限永远触发不了）。
+    cache_idle_slots: false
     # 额外透传给 llama-server 的参数（原样拼接在内置参数之后）
     # extra_args:
     #   - "--flash-attn"

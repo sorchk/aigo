@@ -94,7 +94,7 @@ func (h *ModelHub) initRerank() {
 			if modelCfg == nil {
 				return nil, fmt.Errorf("rerank model config not found: %s", name)
 			}
-			mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath)
+			mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath, cfg.Logging)
 			if err := mgr.Start(); err != nil {
 				return nil, err
 			}
@@ -120,7 +120,7 @@ func (h *ModelHub) initLLM() {
 		if modelCfg == nil {
 			return nil, fmt.Errorf("llm model config not found: %s", name)
 		}
-		mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath)
+		mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath, cfg.Logging)
 		if err := mgr.Start(); err != nil {
 			return nil, err
 		}
@@ -169,7 +169,7 @@ func (h *ModelHub) initEmbedding() {
 			if modelCfg == nil {
 				return nil, fmt.Errorf("embedding model config not found: %s", name)
 			}
-			mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath)
+			mgr := NewLlamaServerManager(*modelCfg, cfg.LlamaServerPath, cfg.Logging)
 			if err := mgr.Start(); err != nil {
 				return nil, err
 			}

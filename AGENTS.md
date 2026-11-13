@@ -103,7 +103,7 @@ Top-level: `onnxruntime_lib`, `llama_server_path`. Models is a flat list where e
 
 ## Development Notes
 
-- No tests exist — no `*_test.go` files, no test deps in `go.mod`
+- Tests: stdlib-only `*_test.go` files exist for config parsing and llama-server log controls (`internal/config/config_log_test.go`, `internal/model/llm_support_test.go`); no third-party test deps in `go.mod`. Run `go test ./...` inside a CGO-enabled environment (`internal/model` pulls in `onnxruntime_go`).
 - No linting tools configured — run `go fmt` before commits
 - `gin.ReleaseMode` set explicitly; `gin.New()` + `gin.Recovery()` (not `gin.Default()`)
 - ONNX Runtime: requires v1.12.1 binding (API v19) to match ORT 1.19.2 shared library

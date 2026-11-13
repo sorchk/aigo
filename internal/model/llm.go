@@ -27,13 +27,15 @@ type LlamaServerManager struct {
 	ready           bool
 	cancelFn        context.CancelFunc
 	modelCfg        config.ModelConfig
+	logging         *config.LoggingConfig
 	serverBinary    string
 	stopped         bool
 	done            chan struct{}
 	serverModelName string
+	logCloser       io.Closer
 }
 
-func NewLlamaServerManager(cfg config.ModelConfig, serverBinary string) *LlamaServerManager {
+func NewLlamaServerManager(cfg config.ModelConfig, serverBinary string, logging *config.LoggingConfig) *LlamaServerManager {
 	socketPath := cfg.SocketPath
 	if socketPath == "" {
 		socketPath = fmt.Sprintf("/tmp/llama-%s.sock", cfg.Name)
@@ -46,6 +48,7 @@ func NewLlamaServerManager(cfg config.ModelConfig, serverBinary string) *LlamaSe
 	return &LlamaServerManager{
 		socketPath:   socketPath,
 		modelCfg:     cfg,
+		logging:      logging,
 		serverBinary: serverBinary,
 		client: &http.Client{
 			Transport: &http.Transport{
@@ -176,6 +179,41 @@ func (m *LlamaServerManager) buildArgs() []string {
 	return args
 }
 
+// appendServerArgs 追加需要探测支持情况的 llama-server 参数。
+// 二进制不支持的参数会被跳过并打印告警，避免 llama-server 因未知参数启动失败。
+func (m *LlamaServerManager) appendServerArgs(args []string) []string {
+	sup := probeServerFlags(m.serverBinary)
+	if !sup.known {
+		log.Printf("llama-server %s: could not probe binary flags, only -lv will be passed", m.modelCfg.Name)
+	}
+
+	if m.modelCfg.LogVerbosity != nil && sup.supports("-lv") {
+		args = append(args, "-lv", strconv.Itoa(*m.modelCfg.LogVerbosity))
+	}
+
+	if m.modelCfg.CacheIdleSlots != nil {
+		if sup.supports("--cache-idle-slots") {
+			if *m.modelCfg.CacheIdleSlots {
+				args = append(args, "--cache-idle-slots")
+			} else {
+				args = append(args, "--no-cache-idle-slots")
+			}
+		} else if sup.known {
+			log.Printf("llama-server %s: binary does not support --cache-idle-slots, skipped", m.modelCfg.Name)
+		}
+	}
+
+	if m.modelCfg.CacheRAM > 0 {
+		if sup.supports("--cache-ram") {
+			args = append(args, "--cache-ram", strconv.Itoa(m.modelCfg.CacheRAM))
+		} else if sup.known {
+			log.Printf("llama-server %s: binary does not support --cache-ram, skipped", m.modelCfg.Name)
+		}
+	}
+
+	return args
+}
+
 func (m *LlamaServerManager) Start() error {
 	m.mu.Lock()
 	if m.cancelFn != nil {
@@ -192,16 +230,37 @@ func (m *LlamaServerManager) Start() error {
 	m.stopped = false
 	m.mu.Unlock()
 
-	args := m.buildArgs()
+	args := m.appendServerArgs(m.buildArgs())
 
-	log.Printf("llama-server %s: n_ctx=%d n_batch=%d n_ubatch=%d n_parallel=%d kv_unified=%s extra_args=%v",
+	verbosity := config.DefaultLogVerbosity
+	if m.modelCfg.LogVerbosity != nil {
+		verbosity = *m.modelCfg.LogVerbosity
+	}
+
+	log.Printf("llama-server %s: n_ctx=%d n_batch=%d n_ubatch=%d n_parallel=%d kv_unified=%s log_verbosity=%d extra_args=%v",
 		m.modelCfg.Name, m.modelCfg.NCtx, m.modelCfg.NBatch, m.modelCfg.NUbatch, m.modelCfg.NParallel,
-		kvUnifiedState(m.modelCfg.KVUnified), m.modelCfg.ExtraArgs)
+		kvUnifiedState(m.modelCfg.KVUnified), verbosity, m.modelCfg.ExtraArgs)
 	log.Printf("llama-server %s args: %s", m.modelCfg.Name, strings.Join(redactArgs(args), " "))
 
 	m.cmd = exec.CommandContext(ctx, m.serverBinary, args...)
-	m.cmd.Stdout = os.Stdout
-	m.cmd.Stderr = os.Stderr
+	// 子进程环境清理掉 LLAMA_ARG_LOG_VERBOSITY，避免环境里的 TRACE 设置被继承。
+	m.cmd.Env = llamaServerEnv(verbosity)
+
+	writer, closer, err := llamaServerLogWriter(m.logging, m.modelCfg.Name)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("open llama-server log: %w", err)
+	}
+	m.cmd.Stdout = writer
+	m.cmd.Stderr = writer
+
+	m.mu.Lock()
+	oldCloser := m.logCloser
+	m.logCloser = closer
+	m.mu.Unlock()
+	if oldCloser != nil {
+		oldCloser.Close()
+	}
 
 	if err := m.cmd.Start(); err != nil {
 		cancel()
@@ -337,6 +396,15 @@ func (m *LlamaServerManager) Shutdown() {
 		}
 	}
 	os.Remove(m.socketPath)
+
+	m.mu.Lock()
+	closer := m.logCloser
+	m.logCloser = nil
+	m.mu.Unlock()
+	if closer != nil {
+		closer.Close()
+	}
+
 	log.Printf("llama-server shutdown complete: %s", m.socketPath)
 }
 
